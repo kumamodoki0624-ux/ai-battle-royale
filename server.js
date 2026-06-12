@@ -2,7 +2,7 @@ const express = require('express');
 const app = express();
 
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.static(__dirname));
 
 // Claude API をサーバー側で呼び出す（APIキーを隠すため）
 app.post('/api/battle', async (req, res) => {
