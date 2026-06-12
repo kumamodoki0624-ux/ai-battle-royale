@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI バトルロワイヤル</title>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+<style>
+  :root {
+    --bg:#0e0e14;--surface:#16161f;--surface2:#1e1e2e;--border:rgba(255,255,255,0.08);
+    --accent:#a78bfa;--accent2:#f97316;--text:#e2e2f0;--muted:#8888aa;
+    --radius:12px;--font:'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;
+    display:flex;flex-direction:column;align-items:center;padding:24px 16px 48px;}
+  header{text-align:center;margin-bottom:32px;}
+  header h1{font-size:clamp(22px,5vw,36px);font-weight:700;letter-spacing:.05em;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px;}
+  header p{color:var(--muted);font-size:13px;}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:24px;width:100%;max-width:520px;margin-bottom:16px;}
+  .card h2{font-size:15px;font-weight:600;margin-bottom:16px;color:var(--accent);display:flex;align-items:center;gap:8px;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;margin-top:14px;}
+  label:first-of-type{margin-top:0;}
+  input,textarea,select{width:100%;background:var(--surface2);border:1px solid var(--border);
+    border-radius:8px;color:var(--text);font-family:var(--font);font-size:14px;padding:10px 12px;
+    outline:none;transition:border-color .2s;}
+  input:focus,textarea:focus,select:focus{border-color:var(--accent);}
+  textarea{resize:vertical;min-height:80px;}
+  .btn{display:block;width:100%;padding:13px;border-radius:8px;border:none;font-family:var(--font);
+    font-size:15px;font-weight:600;cursor:pointer;transition:opacity .2s,transform .1s;
+    margin-top:20px;letter-spacing:.03em;}
+  .btn:hover{opacity:.88;}.btn:active{transform:scale(.98);}
+  .btn:disabled{opacity:.4;cursor:not-allowed;transform:none;}
+  .btn-primary{background:var(--accent);color:#0e0e14;}
+  .btn-danger{background:var(--accent2);color:#0e0e14;}
+  .btn-ghost{background:var(--surface2);color:var(--text);border:1px solid var(--border);}
+  .players-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;}
+  .player-chip{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;}
+  .player-chip .name{font-weight:600;color:var(--text);}
+  .player-chip .status{font-size:11px;color:var(--muted);margin-top:2px;}
+  .player-chip.ready .status{color:#4ade80;}
+  .player-chip.empty .name{color:var(--muted);font-weight:400;}
+  .room-code{background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+    padding:12px 16px;font-size:28px;font-weight:700;letter-spacing:.2em;text-align:center;
+    color:var(--accent);margin-bottom:8px;}
+  .hint{font-size:12px;color:var(--muted);text-align:center;line-height:1.6;}
+  #battle-log{background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+    padding:16px;font-size:14px;line-height:2;white-space:pre-wrap;margin-top:16px;
+    min-height:120px;max-height:420px;overflow-y:auto;color:var(--text);}
+  .rank-list{margin-top:12px;}
+  .rank-item{display:flex;align-items:center;gap:12px;padding:12px 14px;
+    background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+    margin-bottom:8px;font-size:15px;font-weight:600;}
+  .rank-medal{font-size:22px;min-width:30px;text-align:center;}
+  .loading-dots span{animation:blink 1.2s infinite;opacity:0;}
+  .loading-dots span:nth-child(2){animation-delay:.2s;}
+  .loading-dots span:nth-child(3){animation-delay:.4s;}
+  @keyframes blink{0%,80%,100%{opacity:0}40%{opacity:1}}
+  .phase{display:none;}.phase.active{display:block;}
+  .tag{display:inline-block;font-size:10px;padding:2px 7px;border-radius:99px;
+    font-weight:600;letter-spacing:.05em;vertical-align:middle;margin-left:6px;}
+  .tag-host{background:rgba(167,139,250,.2);color:var(--accent);}
+</style>
+</head>
+<body>
+<header>
+  <h1>⚔️ AI バトルロワイヤル</h1>
+  <p>キャラを作って、AIに戦わせよう</p>
+</header>
+
+<!-- PHASE 0: セットアップ -->
+<div id="phase-setup" class="phase active card">
+  <h2>⚙️ ゲーム設定</h2>
+  <label>あなたの名前</label>
+  <input type="text" id="input-myname" placeholder="プレイヤー名" maxlength="16">
+  <label>参加人数（ホストのみ設定）</label>
+  <select id="input-maxplayers">
+    <option value="2">2人</option>
+    <option value="3" selected>3人</option>
+    <option value="4">4人</option>
+  </select>
+  <button class="btn btn-primary" id="btn-create">ルームを作成してホストになる</button>
+  <button class="btn btn-ghost" id="btn-join-init" style="margin-top:10px">ルームコードで参加する</button>
+  <div id="join-form" style="display:none;margin-top:14px;">
+    <label>ルームコード（4桁）</label>
+    <input type="text" id="input-roomcode" placeholder="例: 4829" maxlength="4"
+      style="letter-spacing:.2em;font-size:20px;text-align:center;">
+    <button class="btn btn-ghost" id="btn-join" style="margin-top:10px">参加する</button>
+  </div>
+</div>
+
+<!-- PHASE 1: キャラ入力 -->
+<div id="phase-char" class="phase card">
+  <h2>🧙 キャラクターを作ろう <span id="host-tag"></span></h2>
+  <div class="room-code" id="display-roomcode">----</div>
+  <p class="hint">このコードを仲間に教えてください<br>全員が入力を終えたらホストがバトルを開始できます</p>
+  <div style="margin-top:20px;">
+    <label>キャラクター名</label>
+    <input type="text" id="char-name" placeholder="例: 闇の魔術師ザルーク" maxlength="20">
+    <label>特徴・能力・性格（自由に書いてください）</label>
+    <textarea id="char-desc" placeholder="例：炎を操る元王国の魔術師。プライドが高く冷静だが、仲間を傷つけられると激昂する。必殺技は「炎の柩」。"></textarea>
+  </div>
+  <button class="btn btn-primary" id="btn-submit-char">このキャラで参加確定！</button>
+  <div style="margin-top:20px;">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">参加状況</div>
+    <div class="players-grid" id="players-status"></div>
+  </div>
+  <button class="btn btn-danger" id="btn-start-battle" style="display:none;margin-top:20px;">
+    全員そろった！バトル開始！
+  </button>
+</div>
+
+<!-- PHASE 2: バトル中 -->
+<div id="phase-battle" class="phase card">
+  <h2>⚔️ バトル中<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></h2>
+  <p style="font-size:13px;color:var(--muted);margin-bottom:8px;">AIがバトルを生成しています。しばらくお待ちください。</p>
+  <div id="battle-log">生成中です...</div>
+</div>
+
+<!-- PHASE 3: 結果 -->
+<div id="phase-result" class="phase card">
+  <h2>🏆 バトル結果</h2>
+  <div class="rank-list" id="rank-list"></div>
+  <div style="margin-top:20px;">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">バトル詳細</div>
+    <div id="battle-log-result" style="background:var(--surface2);border:1px solid var(--border);
+      border-radius:8px;padding:16px;font-size:13px;line-height:2;white-space:pre-wrap;
+      max-height:400px;overflow-y:auto;"></div>
+  </div>
+  <button class="btn btn-ghost" id="btn-replay" style="margin-top:20px;">もう一度遊ぶ</button>
+</div>
+
+<script>
+// Firebase設定（埋め込み済み）
+firebase.initializeApp({
+  apiKey: "AIzaSyDmtiPcQfFDRDK8DcOg2k6Tlqgk1wcS9VE",
+  databaseURL: "https://kumamodoki-games-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "kumamodoki-games",
+  appId: "1:679874027550:web:4293f1a18d2a2a5c2b0e0f",
+  authDomain: "kumamodoki-games.firebaseapp.com",
+});
+const db = firebase.database();
+
+let state = {
+  roomCode:null, isHost:false, myName:'',
+  myId:'p_'+Math.random().toString(36).slice(2,8), maxPlayers:3
+};
+
+function showPhase(name){
+  document.querySelectorAll('.phase').forEach(el=>el.classList.remove('active'));
+  document.getElementById('phase-'+name).classList.add('active');
+}
+function genCode(){ return String(Math.floor(1000+Math.random()*9000)); }
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+document.getElementById('btn-create').addEventListener('click', async()=>{
+  const name=document.getElementById('input-myname').value.trim();
+  if(!name) return alert('名前を入力してください');
+  state.isHost=true; state.myName=name;
+  state.maxPlayers=parseInt(document.getElementById('input-maxplayers').value);
+  state.roomCode=genCode();
+  await db.ref('rooms/'+state.roomCode).set({maxPlayers:state.maxPlayers,phase:'waiting',createdAt:Date.now()});
+  enterCharPhase();
+});
+
+document.getElementById('btn-join-init').addEventListener('click',()=>{
+  document.getElementById('join-form').style.display='block';
+});
+
+document.getElementById('btn-join').addEventListener('click', async()=>{
+  const name=document.getElementById('input-myname').value.trim();
+  const code=document.getElementById('input-roomcode').value.trim();
+  if(!name) return alert('名前を入力してください');
+  if(code.length!==4) return alert('4桁のルームコードを入力してください');
+  state.isHost=false; state.myName=name; state.roomCode=code;
+  const snap=await db.ref('rooms/'+code).once('value');
+  if(!snap.exists()) return alert('そのルームコードは存在しません');
+  state.maxPlayers=snap.val().maxPlayers;
+  enterCharPhase();
+});
+
+function enterCharPhase(){
+  document.getElementById('display-roomcode').textContent=state.roomCode;
+  document.getElementById('host-tag').innerHTML=state.isHost?'<span class="tag tag-host">ホスト</span>':'';
+  showPhase('char');
+  listenPlayers();
+}
+
+function listenPlayers(){
+  db.ref('rooms/'+state.roomCode+'/players').on('value', snap=>{
+    renderPlayersStatus(snap.val()||{});
+  });
+  db.ref('rooms/'+state.roomCode+'/phase').on('value', snap=>{
+    if(snap.val()==='battling'){
+      if(!document.getElementById('phase-battle').classList.contains('active')){
+        db.ref('rooms/'+state.roomCode+'/players').once('value',ps=>enterBattlePhase(ps.val()||{}));
+      }
+    }
+    if(snap.val()==='done') fetchAndShowResult();
+  });
+}
+
+function renderPlayersStatus(players){
+  const grid=document.getElementById('players-status');
+  grid.innerHTML='';
+  const list=Object.values(players);
+  for(let i=0;i<state.maxPlayers;i++){
+    const p=list[i], chip=document.createElement('div');
+    if(p){
+      chip.className='player-chip'+(p.charName?' ready':'');
+      chip.innerHTML=`<div class="name">${esc(p.name)}</div><div class="status">${p.charName?'✓ '+esc(p.charName):'入力中...'}</div>`;
+    } else {
+      chip.className='player-chip empty';
+      chip.innerHTML='<div class="name">待機中...</div><div class="status">－</div>';
+    }
+    grid.appendChild(chip);
+  }
+  const allReady=list.length>=state.maxPlayers&&list.every(p=>p.charName);
+  if(state.isHost) document.getElementById('btn-start-battle').style.display=allReady?'block':'none';
+}
+
+document.getElementById('btn-submit-char').addEventListener('click', async()=>{
+  const charName=document.getElementById('char-name').value.trim();
+  const charDesc=document.getElementById('char-desc').value.trim();
+  if(!charName) return alert('キャラクター名を入力してください');
+  if(!charDesc) return alert('特徴・能力を入力してください');
+  await db.ref('rooms/'+state.roomCode+'/players/'+state.myId).set({
+    id:state.myId, name:state.myName, charName, charDesc
+  });
+  document.getElementById('btn-submit-char').disabled=true;
+  document.getElementById('btn-submit-char').textContent='確定済み ✓';
+  document.getElementById('char-name').disabled=true;
+  document.getElementById('char-desc').disabled=true;
+});
+
+document.getElementById('btn-start-battle').addEventListener('click', async()=>{
+  await db.ref('rooms/'+state.roomCode+'/phase').set('battling');
+  const snap=await db.ref('rooms/'+state.roomCode+'/players').once('value');
+  enterBattlePhase(snap.val()||{});
+});
+
+async function enterBattlePhase(players){
+  if(document.getElementById('phase-battle').classList.contains('active')) return;
+  showPhase('battle');
+  if(state.isHost) await runBattle(players);
+}
+
+// Claude API呼び出しはサーバー経由（APIキー不要）
+async function runBattle(players){
+  const log=document.getElementById('battle-log');
+  log.textContent='';
+  let fullText='';
+
+  try {
+    const res=await fetch('/api/battle',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({players:Object.values(players)})
+    });
+
+    if(!res.ok){
+      const err=await res.json();
+      throw new Error(err.error||'サーバーエラー');
+    }
+
+    const reader=res.body.getReader(), decoder=new TextDecoder();
+    while(true){
+      const {done,value}=await reader.read();
+      if(done) break;
+      for(const line of decoder.decode(value).split('\n')){
+        if(!line.startsWith('data: ')) continue;
+        const d=line.slice(6).trim();
+        if(d==='[DONE]') continue;
+        try{
+          const delta=JSON.parse(d).delta?.text||'';
+          fullText+=delta;
+          log.textContent=fullText;
+          log.scrollTop=log.scrollHeight;
+        }catch{}
+      }
+    }
+    await db.ref('rooms/'+state.roomCode+'/result').set(fullText);
+    await db.ref('rooms/'+state.roomCode+'/phase').set('done');
+  } catch(e){
+    log.textContent='⚠️ エラーが発生しました：'+e.message;
+  }
+}
+
+async function fetchAndShowResult(){
+  if(document.getElementById('phase-result').classList.contains('active')) return;
+  const snap=await db.ref('rooms/'+state.roomCode+'/result').once('value');
+  showResult(snap.val()||'');
+}
+
+function showResult(fullText){
+  showPhase('result');
+  document.getElementById('battle-log-result').textContent=fullText;
+  const jsonMatch=fullText.match(/```json\s*([\s\S]*?)```/);
+  const rankList=document.getElementById('rank-list');
+  rankList.innerHTML='';
+  if(jsonMatch){
+    try{
+      const ranks=JSON.parse(jsonMatch[1].trim());
+      const medals=['🥇','🥈','🥉'];
+      ranks.sort((a,b)=>a.rank-b.rank).forEach(r=>{
+        const item=document.createElement('div');
+        item.className='rank-item';
+        item.innerHTML=`
+          <span class="rank-medal">${medals[r.rank-1]||r.rank+'位'}</span>
+          <span style="flex:1">
+            <span style="font-size:16px">${esc(r.name)}</span>
+            <span style="font-size:12px;color:var(--muted);margin-left:8px">${esc(r.player)}</span>
+          </span>
+          <span style="font-size:12px;color:var(--muted);text-align:right;max-width:140px">${esc(r.comment||'')}</span>`;
+        rankList.appendChild(item);
+      });
+    }catch{
+      rankList.innerHTML='<p style="color:var(--muted);font-size:13px">順位データの解析に失敗しました</p>';
+    }
+  }
+}
+
+document.getElementById('btn-replay').addEventListener('click',()=>{
+  if(state.roomCode){ db.ref('rooms/'+state.roomCode).off(); }
+  state.roomCode=null; state.isHost=false;
+  ['btn-submit-char','char-name','char-desc'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.disabled=false;
+    if(id==='btn-submit-char') el.textContent='このキャラで参加確定！';
+    else el.value='';
+  });
+  document.getElementById('join-form').style.display='none';
+  showPhase('setup');
+});
+</script>
+</body>
+</html>
