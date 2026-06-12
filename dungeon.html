@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI ダンジョン探索</title>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+<style>
+  :root{
+    --bg:#0a0a0f;--surface:#111118;--surface2:#18181f;--border:rgba(255,255,255,0.07);
+    --accent:#f59e0b;--accent2:#10b981;--danger:#ef4444;--text:#e8e8d8;--muted:#777766;
+    --radius:12px;--font:'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;
+    display:flex;flex-direction:column;align-items:center;padding:0 0 60px;overflow-x:hidden;}
+
+  /* ヒーロー */
+  .hero{width:100%;max-width:600px;padding:24px 16px 0;text-align:center;}
+  .hero-canvas{display:block;width:100%;height:160px;border-radius:14px;margin-bottom:14px;}
+  .hero h1{font-size:clamp(22px,5vw,34px);font-weight:800;letter-spacing:.04em;
+    background:linear-gradient(135deg,#f59e0b,#10b981,#60a5fa);
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px;}
+  .hero p{color:var(--muted);font-size:13px;margin-bottom:20px;}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:22px;width:100%;max-width:560px;margin-bottom:12px;}
+  .card h2{font-size:15px;font-weight:700;margin-bottom:16px;color:var(--accent);
+    display:flex;align-items:center;gap:8px;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;margin-top:13px;}
+  label:first-of-type{margin-top:0;}
+  input,select{width:100%;background:var(--surface2);border:1px solid var(--border);
+    border-radius:8px;color:var(--text);font-family:var(--font);font-size:14px;padding:10px 12px;
+    outline:none;transition:border-color .2s;}
+  input:focus,select:focus{border-color:var(--accent);}
+  .btn{display:block;width:100%;padding:13px;border-radius:10px;border:none;
+    font-family:var(--font);font-size:15px;font-weight:700;cursor:pointer;
+    transition:opacity .2s,transform .1s;margin-top:16px;letter-spacing:.03em;}
+  .btn:hover{opacity:.88;}.btn:active{transform:scale(.97);}
+  .btn:disabled{opacity:.3;cursor:not-allowed;transform:none;}
+  .btn-primary{background:linear-gradient(135deg,var(--accent),#d97706);color:#0a0a0f;}
+  .btn-success{background:linear-gradient(135deg,var(--accent2),#059669);color:#fff;}
+  .btn-ghost{background:var(--surface2);color:var(--text);border:1px solid var(--border);}
+
+  /* プレイヤー一覧 */
+  .players-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;}
+  .player-chip{background:var(--surface2);border:1px solid var(--border);border-radius:10px;
+    padding:10px 12px;font-size:13px;transition:border-color .3s;}
+  .player-chip .pname{font-weight:700;color:var(--text);}
+  .player-chip .status{font-size:11px;color:var(--muted);margin-top:3px;}
+  .player-chip.ready{border-color:rgba(16,185,129,.4);}
+  .player-chip.ready .status{color:#10b981;}
+  .player-chip.empty .pname{color:var(--muted);font-weight:400;}
+
+  /* ルームコード */
+  .room-code{background:var(--surface2);border:1px solid rgba(245,158,11,.3);border-radius:10px;
+    padding:14px;font-size:30px;font-weight:800;letter-spacing:.25em;text-align:center;
+    color:var(--accent);margin-bottom:10px;}
+  .hint{font-size:12px;color:var(--muted);text-align:center;line-height:1.7;}
+
+  /* ナレーションログ */
+  #narration{background:var(--surface2);border:1px solid var(--border);border-radius:10px;
+    padding:18px;font-size:14px;line-height:2.1;white-space:pre-wrap;
+    min-height:120px;max-height:360px;overflow-y:auto;color:var(--text);margin-bottom:16px;}
+
+  /* 選択肢 */
+  .choices-wrap{display:flex;flex-direction:column;gap:8px;margin-bottom:16px;}
+  .choice-btn{background:var(--surface2);border:1px solid var(--border);border-radius:10px;
+    padding:13px 16px;font-size:14px;color:var(--text);cursor:pointer;text-align:left;
+    font-family:var(--font);transition:border-color .2s,background .2s;}
+  .choice-btn:hover{border-color:var(--accent);background:rgba(245,158,11,.08);}
+  .choice-btn.selected{border-color:var(--accent);background:rgba(245,158,11,.15);color:var(--accent);font-weight:700;}
+  .choice-btn:disabled{opacity:.4;cursor:not-allowed;}
+
+  /* アクション入力 */
+  .action-input{display:flex;gap:8px;margin-bottom:12px;}
+  .action-input input{flex:1;}
+  .action-input button{flex-shrink:0;padding:10px 16px;border-radius:8px;border:none;
+    background:var(--accent);color:#0a0a0f;font-weight:700;font-size:14px;cursor:pointer;}
+
+  /* 待機状態 */
+  .waiting-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+  .waiting-chip{background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+    padding:4px 10px;font-size:12px;color:var(--muted);}
+  .waiting-chip.done{border-color:rgba(16,185,129,.4);color:#10b981;}
+
+  /* ターン表示 */
+  .turn-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(245,158,11,.15);
+    border:1px solid rgba(245,158,11,.3);border-radius:20px;padding:4px 12px;
+    font-size:12px;font-weight:700;color:var(--accent);margin-bottom:14px;}
+
+  /* 結果 */
+  .result-card{background:var(--surface2);border-radius:12px;padding:20px;margin-bottom:12px;text-align:center;}
+  .result-victory{border:1px solid rgba(245,158,11,.5);}
+  .result-defeat{border:1px solid rgba(239,68,68,.5);}
+  .result-title{font-size:28px;font-weight:800;margin-bottom:8px;}
+  .result-mvp{font-size:14px;color:var(--muted);margin-top:10px;}
+
+  /* ターン進捗バー */
+  .progress-bar{background:var(--surface2);border-radius:4px;height:6px;margin-bottom:14px;overflow:hidden;}
+  .progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));
+    border-radius:4px;transition:width .5s ease;}
+
+  .loading-dots span{animation:blink 1.2s infinite;opacity:0;}
+  .loading-dots span:nth-child(2){animation-delay:.2s;}
+  .loading-dots span:nth-child(3){animation-delay:.4s;}
+  @keyframes blink{0%,80%,100%{opacity:0}40%{opacity:1}}
+  .phase{display:none;}.phase.active{display:block;}
+  .tag{display:inline-block;font-size:10px;padding:2px 8px;border-radius:99px;
+    font-weight:700;vertical-align:middle;margin-left:6px;}
+  .tag-host{background:rgba(245,158,11,.2);color:var(--accent);}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <canvas class="hero-canvas" id="hero-canvas"></canvas>
+  <h1>🗡️ AI ダンジョン探索</h1>
+  <p>仲間と協力してダンジョンを攻略しよう</p>
+</div>
+
+<!-- PHASE 0: セットアップ -->
+<div id="phase-setup" class="phase active card">
+  <h2>⚙️ ゲーム設定</h2>
+  <label>あなたの名前</label>
+  <input type="text" id="input-myname" placeholder="冒険者の名前" maxlength="12">
+  <label>職業</label>
+  <select id="input-job">
+    <option value="戦士">⚔️ 戦士（前線で戦う）</option>
+    <option value="魔法使い">🔮 魔法使い（強力な魔法を使う）</option>
+    <option value="盗賊">🗡️ 盗賊（素早く罠を解除する）</option>
+    <option value="僧侶">✨ 僧侶（仲間を回復・支援する）</option>
+    <option value="弓使い">🏹 弓使い（遠距離から援護する）</option>
+    <option value="召喚士">🐉 召喚士（魔物を使役する）</option>
+  </select>
+  <label>得意なスキル・特技（一言で）</label>
+  <input type="text" id="input-skill" placeholder="例：炎の魔法が得意、罠を見破る目を持つ" maxlength="30">
+  <label>参加人数（ホストのみ）</label>
+  <select id="input-maxplayers">
+    <option value="2">2人</option>
+    <option value="3" selected>3人</option>
+    <option value="4">4人</option>
+    <option value="5">5人</option>
+  </select>
+  <button class="btn btn-primary" id="btn-create">🏰 ルームを作成してホストになる</button>
+  <button class="btn btn-ghost" id="btn-join-init" style="margin-top:10px">🔑 ルームコードで参加する</button>
+  <div id="join-form" style="display:none;margin-top:14px;">
+    <label>ルームコード（4桁）</label>
+    <input type="text" id="input-roomcode" placeholder="例: 4829" maxlength="4"
+      style="letter-spacing:.25em;font-size:22px;text-align:center;">
+    <button class="btn btn-ghost" id="btn-join" style="margin-top:10px">参加する →</button>
+  </div>
+</div>
+
+<!-- PHASE 1: 待機 -->
+<div id="phase-wait" class="phase card">
+  <h2>🏰 冒険者の集結 <span id="host-tag"></span></h2>
+  <div class="room-code" id="display-roomcode">----</div>
+  <p class="hint">このコードを仲間に教えてください<br>全員が準備完了したらホストが冒険を開始できます</p>
+  <div style="margin-top:20px;">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">参加状況</div>
+    <div class="players-grid" id="players-status"></div>
+  </div>
+  <button class="btn btn-success" id="btn-start-dungeon" style="display:none;margin-top:20px;">
+    ⚔️ 全員集合！ダンジョンへ出発！
+  </button>
+</div>
+
+<!-- PHASE 2: 冒険中 -->
+<div id="phase-dungeon" class="phase card">
+  <div class="turn-badge" id="turn-badge">📍 ターン 1 / 4</div>
+  <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:25%"></div></div>
+
+  <div id="narration">ダンジョンマスターが状況を描写中<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></div>
+
+  <!-- 選択肢（全員共通） -->
+  <div id="choices-section" style="display:none;">
+    <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:10px;">⚔️ あなたの行動を選んでください</div>
+    <div class="choices-wrap" id="choices-wrap"></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">または自由に行動を入力：</div>
+    <div class="action-input">
+      <input type="text" id="custom-action" placeholder="例：壁の隙間から偵察する" maxlength="40">
+      <button id="btn-custom-submit">送信</button>
+    </div>
+  </div>
+
+  <!-- 送信済み待機 -->
+  <div id="waiting-section" style="display:none;">
+    <div style="font-size:13px;color:var(--accent2);margin-bottom:10px;">✓ 行動を送信しました。仲間を待っています...</div>
+    <div class="waiting-list" id="waiting-list"></div>
+    <div style="font-size:12px;color:var(--muted);">全員が行動を送信したら次のターンへ進みます</div>
+  </div>
+
+  <!-- ホスト：次ターンボタン（全員送信後） -->
+  <button class="btn btn-success" id="btn-next-turn" style="display:none;margin-top:16px;">
+    ▶ 次のターンへ進む
+  </button>
+</div>
+
+<!-- PHASE 3: エンディング -->
+<div id="phase-ending" class="phase card">
+  <h2>🏆 冒険の結末</h2>
+  <div id="ending-result"></div>
+  <div id="narration-ending" style="background:var(--surface2);border:1px solid var(--border);
+    border-radius:10px;padding:18px;font-size:14px;line-height:2.1;white-space:pre-wrap;
+    max-height:400px;overflow-y:auto;margin-top:16px;"></div>
+  <button class="btn btn-ghost" id="btn-replay" style="margin-top:20px;">🔄 もう一度遊ぶ</button>
+</div>
+
+<script>
+// ══════════════════════════════════════
+//  Firebase
+// ══════════════════════════════════════
+firebase.initializeApp({
+  apiKey:"AIzaSyDmtiPcQfFDRDK8DcOg2k6Tlqgk1wcS9VE",
+  databaseURL:"https://kumamodoki-games-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:"kumamodoki-games",
+  appId:"1:679874027550:web:4293f1a18d2a2a5c2b0e0f",
+  authDomain:"kumamodoki-games.firebaseapp.com",
+});
+const db = firebase.database();
+
+let state = {
+  roomCode:null, isHost:false, myName:'', myJob:'', mySkill:'',
+  myId:'d_'+Math.random().toString(36).slice(2,8),
+  maxPlayers:3, currentTurn:1, totalTurns:4,
+  history:[], myActionSent:false
+};
+
+function showPhase(n){
+  document.querySelectorAll('.phase').forEach(el=>el.classList.remove('active'));
+  document.getElementById('phase-'+n).classList.add('active');
+}
+function genCode(){return String(Math.floor(1000+Math.random()*9000));}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// ══════════════════════════════════════
+//  ヒーローキャンバス（ダンジョン風）
+// ══════════════════════════════════════
+const hc = document.getElementById('hero-canvas');
+const hctx = hc.getContext('2d');
+hc.width = (hc.offsetWidth||560)*devicePixelRatio;
+hc.height = 160*devicePixelRatio;
+hctx.scale(devicePixelRatio,devicePixelRatio);
+const HW=hc.offsetWidth||560, HH=160;
+
+const torches=[{x:60,flicker:0},{x:HW-60,flicker:1}];
+const dungeonChars=[
+  {x:120,y:105,job:'戦士',color:'#60a5fa',t:0},
+  {x:220,y:110,job:'魔法使い',color:'#a78bfa',t:1.2},
+  {x:HW/2,y:108,job:'盗賊',color:'#4ade80',t:0.6},
+  {x:HW-220,y:112,job:'僧侶',color:'#f9a8d4',t:1.8},
+  {x:HW-120,y:106,job:'弓使い',color:'#fbbf24',t:0.9},
+];
+const bats=[
+  {x:HW*0.3,y:30,vx:0.8,vy:0.3,t:0},
+  {x:HW*0.7,y:50,vx:-0.6,vy:0.4,t:1},
+];
+
+function drawTorch(ctx,x,y,flicker){
+  const f=Math.sin(Date.now()/80+flicker*3)*0.3+0.7;
+  // 松明の棒
+  ctx.fillStyle='#92400e'; ctx.fillRect(x-3,y-20,6,30);
+  // 炎
+  const grad=ctx.createRadialGradient(x,y-22,0,x,y-22,18*f);
+  grad.addColorStop(0,'rgba(255,200,50,0.9)');
+  grad.addColorStop(0.5,'rgba(255,100,20,0.6)');
+  grad.addColorStop(1,'rgba(255,50,0,0)');
+  ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(x,y-22,18*f,0,Math.PI*2); ctx.fill();
+  // 光の輪
+  const glow=ctx.createRadialGradient(x,y-22,0,x,y-22,60*f);
+  glow.addColorStop(0,'rgba(255,150,50,0.15)');
+  glow.addColorStop(1,'rgba(255,150,50,0)');
+  ctx.fillStyle=glow; ctx.beginPath(); ctx.arc(x,y-22,60*f,0,Math.PI*2); ctx.fill();
+}
+
+function drawDungeonChar(ctx,c){
+  const bob=Math.sin(c.t*2)*3;
+  ctx.save(); ctx.translate(c.x,c.y+bob); ctx.globalAlpha=0.85;
+  // シルエット風キャラ
+  ctx.fillStyle=c.color;
+  // 体
+  ctx.beginPath(); ctx.ellipse(0,0,10,14,0,0,Math.PI*2); ctx.fill();
+  // 頭
+  ctx.beginPath(); ctx.arc(0,-18,9,0,Math.PI*2); ctx.fill();
+  // 武器（職業別）
+  if(c.job==='戦士'||c.job==='盗賊'){
+    ctx.strokeStyle=c.color; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(12,-24); ctx.lineTo(16,4); ctx.stroke();
+  }
+  if(c.job==='魔法使い'||c.job==='召喚士'){
+    ctx.strokeStyle=c.color; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(-12,-28); ctx.lineTo(-16,4); ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,0.8)'; ctx.globalAlpha=0.6;
+    ctx.beginPath(); ctx.arc(-12,-30,4,0,Math.PI*2); ctx.fill();
+  }
+  if(c.job==='弓使い'){
+    ctx.strokeStyle=c.color; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(16,-14,10,0.5,2.6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(14,-24); ctx.lineTo(18,-4); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawBat(ctx,b){
+  b.x+=b.vx; b.y+=Math.sin(b.t)*0.5; b.t+=0.05;
+  if(b.x<0||b.x>HW) b.vx*=-1;
+  ctx.save(); ctx.translate(b.x,b.y); ctx.globalAlpha=0.5;
+  ctx.fillStyle='#374151';
+  const wing=Math.sin(b.t*8)*8;
+  ctx.beginPath(); ctx.ellipse(-8,0,8,4,-0.3+wing*0.05,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(8,0,8,4,0.3-wing*0.05,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(0,0,4,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function animHero(){
+  hctx.clearRect(0,0,HW,HH);
+  // 背景
+  const bg=hctx.createLinearGradient(0,0,0,HH);
+  bg.addColorStop(0,'#050508'); bg.addColorStop(1,'#0f0a14');
+  hctx.fillStyle=bg; hctx.fillRect(0,0,HW,HH);
+  // 石壁感
+  hctx.strokeStyle='rgba(255,255,255,0.03)'; hctx.lineWidth=1;
+  for(let i=0;i<HW;i+=40){ hctx.beginPath(); hctx.moveTo(i,0); hctx.lineTo(i,HH); hctx.stroke(); }
+  for(let i=0;i<HH;i+=30){ hctx.beginPath(); hctx.moveTo(0,i); hctx.lineTo(HW,i); hctx.stroke(); }
+  // 地面
+  hctx.fillStyle='rgba(100,80,40,0.3)'; hctx.fillRect(0,HH-30,HW,30);
+  // 松明
+  torches.forEach(t=>drawTorch(hctx,t.x,HH-20,t.flicker));
+  // コウモリ
+  bats.forEach(b=>drawBat(hctx,b));
+  // キャラ
+  dungeonChars.forEach(c=>{ c.t+=0.02; drawDungeonChar(hctx,c); });
+  // タイトル感のある霧
+  const fog=hctx.createLinearGradient(0,0,HW,0);
+  fog.addColorStop(0,'rgba(5,5,8,0.7)');
+  fog.addColorStop(0.2,'rgba(5,5,8,0)');
+  fog.addColorStop(0.8,'rgba(5,5,8,0)');
+  fog.addColorStop(1,'rgba(5,5,8,0.7)');
+  hctx.fillStyle=fog; hctx.fillRect(0,0,HW,HH);
+  requestAnimationFrame(animHero);
+}
+animHero();
+
+// ══════════════════════════════════════
+//  セットアップ
+// ══════════════════════════════════════
+document.getElementById('btn-create').addEventListener('click', async()=>{
+  const name=document.getElementById('input-myname').value.trim();
+  const job=document.getElementById('input-job').value;
+  const skill=document.getElementById('input-skill').value.trim();
+  if(!name) return alert('名前を入力してください');
+  if(!skill) return alert('得意なスキルを入力してください');
+  state.isHost=true; state.myName=name; state.myJob=job; state.mySkill=skill;
+  state.maxPlayers=parseInt(document.getElementById('input-maxplayers').value);
+  state.roomCode=genCode();
+  await db.ref('drooms/'+state.roomCode).set({maxPlayers:state.maxPlayers,phase:'waiting',turn:0,createdAt:Date.now()});
+  await registerPlayer();
+  enterWaitPhase();
+});
+
+document.getElementById('btn-join-init').addEventListener('click',()=>{
+  document.getElementById('join-form').style.display='block';
+});
+
+document.getElementById('btn-join').addEventListener('click', async()=>{
+  const name=document.getElementById('input-myname').value.trim();
+  const job=document.getElementById('input-job').value;
+  const skill=document.getElementById('input-skill').value.trim();
+  const code=document.getElementById('input-roomcode').value.trim();
+  if(!name) return alert('名前を入力してください');
+  if(!skill) return alert('得意なスキルを入力してください');
+  if(code.length!==4) return alert('4桁のルームコードを入力してください');
+  state.isHost=false; state.myName=name; state.myJob=job; state.mySkill=skill; state.roomCode=code;
+  const snap=await db.ref('drooms/'+code).once('value');
+  if(!snap.exists()) return alert('そのルームコードは存在しません');
+  state.maxPlayers=snap.val().maxPlayers;
+  await registerPlayer();
+  enterWaitPhase();
+});
+
+async function registerPlayer(){
+  await db.ref('drooms/'+state.roomCode+'/players/'+state.myId).set({
+    id:state.myId, name:state.myName, job:state.myJob, skill:state.mySkill
+  });
+}
+
+// ══════════════════════════════════════
+//  待機フェーズ
+// ══════════════════════════════════════
+function enterWaitPhase(){
+  document.getElementById('display-roomcode').textContent=state.roomCode;
+  document.getElementById('host-tag').innerHTML=state.isHost?'<span class="tag tag-host">ホスト</span>':'';
+  showPhase('wait');
+  listenRoom();
+}
+
+function listenRoom(){
+  db.ref('drooms/'+state.roomCode+'/players').on('value',snap=>{
+    renderPlayersStatus(snap.val()||{});
+  });
+  db.ref('drooms/'+state.roomCode+'/phase').on('value',snap=>{
+    const phase=snap.val();
+    if(phase==='playing' && !document.getElementById('phase-dungeon').classList.contains('active')){
+      enterDungeonPhase();
+    }
+    if(phase==='ended') fetchEnding();
+  });
+  db.ref('drooms/'+state.roomCode+'/turn').on('value', snap=>{
+    const turn=snap.val()||0;
+    if(turn>0 && document.getElementById('phase-dungeon').classList.contains('active')){
+      updateTurnDisplay(turn);
+    }
+  });
+  // 行動状況を監視
+  db.ref('drooms/'+state.roomCode+'/actions').on('value', snap=>{
+    updateActionStatus(snap.val()||{});
+  });
+  // ナレーション監視
+  db.ref('drooms/'+state.roomCode+'/narration').on('value', snap=>{
+    if(snap.val() && document.getElementById('phase-dungeon').classList.contains('active')){
+      document.getElementById('narration').textContent=snap.val();
+    }
+  });
+  // 選択肢監視
+  db.ref('drooms/'+state.roomCode+'/choices').on('value', snap=>{
+    if(snap.val()) showChoices(snap.val());
+  });
+}
+
+function renderPlayersStatus(players){
+  const grid=document.getElementById('players-status');
+  grid.innerHTML='';
+  const list=Object.values(players);
+  for(let i=0;i<state.maxPlayers;i++){
+    const p=list[i],chip=document.createElement('div');
+    if(p){
+      chip.className='player-chip ready';
+      chip.innerHTML=`<div class="pname">${esc(p.name)}</div><div class="status">${esc(p.job)} ✓</div>`;
+    }else{
+      chip.className='player-chip empty';
+      chip.innerHTML='<div class="pname">待機中...</div><div class="status">－</div>';
+    }
+    grid.appendChild(chip);
+  }
+  const allReady=list.length>=state.maxPlayers;
+  if(state.isHost) document.getElementById('btn-start-dungeon').style.display=allReady?'block':'none';
+}
+
+document.getElementById('btn-start-dungeon').addEventListener('click', async()=>{
+  await db.ref('drooms/'+state.roomCode+'/phase').set('playing');
+  await db.ref('drooms/'+state.roomCode+'/turn').set(1);
+  enterDungeonPhase();
+  if(state.isHost) await startTurn(1);
+});
+
+// ══════════════════════════════════════
+//  ダンジョンフェーズ
+// ══════════════════════════════════════
+async function enterDungeonPhase(){
+  if(document.getElementById('phase-dungeon').classList.contains('active')) return;
+  showPhase('dungeon');
+  state.myActionSent=false;
+  state.currentTurn=1;
+  updateTurnDisplay(1);
+}
+
+function updateTurnDisplay(turn){
+  state.currentTurn=turn;
+  document.getElementById('turn-badge').textContent=`📍 ターン ${turn} / ${state.totalTurns}`;
+  document.getElementById('progress-fill').style.width=(turn/state.totalTurns*100)+'%';
+}
+
+// ホスト：ターン開始（AIにナレーション依頼）
+async function startTurn(turn){
+  document.getElementById('narration').innerHTML='ダンジョンマスターが状況を描写中<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span>';
+  document.getElementById('choices-section').style.display='none';
+  document.getElementById('waiting-section').style.display='none';
+  document.getElementById('btn-next-turn').style.display='none';
+
+  const playersSnap=await db.ref('drooms/'+state.roomCode+'/players').once('value');
+  const players=Object.values(playersSnap.val()||{});
+
+  const endpoint = turn===1 ? '/api/dungeon/start' : '/api/dungeon/turn';
+  const body = turn===1
+    ? {players}
+    : {players, history:state.history, actions:await getActions(), turn};
+
+  let fullText='';
+  try{
+    const res=await fetch(endpoint,{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)
+    });
+    const reader=res.body.getReader(),decoder=new TextDecoder();
+    while(true){
+      const{done,value}=await reader.read(); if(done) break;
+      for(const line of decoder.decode(value).split('\n')){
+        if(!line.startsWith('data: ')) continue;
+        const d=line.slice(6).trim(); if(d==='[DONE]') continue;
+        try{const delta=JSON.parse(d).delta?.text||''; fullText+=delta;}catch{}
+      }
+    }
+  }catch(e){ fullText='エラーが発生しました：'+e.message; }
+
+  // JSONを抽出してFirebaseに保存
+  const jsonMatch=fullText.match(/```json\s*([\s\S]*?)```/);
+  const narrationOnly=fullText.replace(/```json[\s\S]*?```/g,'').trim();
+  state.history.push(narrationOnly);
+
+  await db.ref('drooms/'+state.roomCode+'/narration').set(narrationOnly);
+
+  if(jsonMatch){
+    try{
+      const parsed=JSON.parse(jsonMatch[1].trim());
+      if(parsed.ending){
+        await db.ref('drooms/'+state.roomCode+'/ending').set({...parsed, narration:narrationOnly});
+        await db.ref('drooms/'+state.roomCode+'/phase').set('ended');
+      } else if(parsed.choices){
+        await db.ref('drooms/'+state.roomCode+'/choices').set(parsed.choices);
+        await db.ref('drooms/'+state.roomCode+'/actions').set(null);
+      }
+    }catch{}
+  }
+}
+
+async function getActions(){
+  const snap=await db.ref('drooms/'+state.roomCode+'/actions').once('value');
+  return Object.values(snap.val()||{});
+}
+
+function showChoices(choices){
+  if(state.myActionSent) return;
+  document.getElementById('choices-section').style.display='block';
+  document.getElementById('waiting-section').style.display='none';
+  const wrap=document.getElementById('choices-wrap');
+  wrap.innerHTML='';
+  choices.forEach(c=>{
+    const btn=document.createElement('button');
+    btn.className='choice-btn'; btn.textContent=`${c.id}. ${c.text}`;
+    btn.addEventListener('click',()=>{
+      wrap.querySelectorAll('.choice-btn').forEach(b=>b.classList.remove('selected'));
+      btn.classList.add('selected');
+      submitAction(c.text);
+    });
+    wrap.appendChild(btn);
+  });
+}
+
+async function submitAction(actionText){
+  if(state.myActionSent) return;
+  state.myActionSent=true;
+  await db.ref('drooms/'+state.roomCode+'/actions/'+state.myId).set({
+    playerId:state.myId, playerName:state.myName, action:actionText
+  });
+  document.getElementById('choices-section').style.display='none';
+  document.getElementById('waiting-section').style.display='block';
+}
+
+document.getElementById('btn-custom-submit').addEventListener('click',()=>{
+  const val=document.getElementById('custom-action').value.trim();
+  if(!val) return;
+  submitAction(val);
+});
+
+function updateActionStatus(actions){
+  const list=Object.values(actions);
+  const waitList=document.getElementById('waiting-list');
+  if(!waitList) return;
+  waitList.innerHTML='';
+
+  // 全プレイヤー分表示
+  db.ref('drooms/'+state.roomCode+'/players').once('value',snap=>{
+    const players=Object.values(snap.val()||{});
+    players.forEach(p=>{
+      const done=list.find(a=>a.playerId===p.id);
+      const chip=document.createElement('div');
+      chip.className='waiting-chip'+(done?' done':'');
+      chip.textContent=(done?'✓ ':'⏳ ')+p.name;
+      waitList.appendChild(chip);
+    });
+
+    // 全員送信済みかチェック
+    const allDone=players.length>0&&players.every(p=>list.find(a=>a.playerId===p.id));
+    const nextBtn=document.getElementById('btn-next-turn');
+    if(state.isHost && allDone && document.getElementById('phase-dungeon').classList.contains('active')){
+      nextBtn.style.display='block';
+    }
+  });
+}
+
+document.getElementById('btn-next-turn').addEventListener('click', async()=>{
+  if(!state.isHost) return;
+  document.getElementById('btn-next-turn').style.display='none';
+  document.getElementById('waiting-section').style.display='none';
+  state.myActionSent=false;
+  const nextTurn=state.currentTurn+1;
+  await db.ref('drooms/'+state.roomCode+'/turn').set(nextTurn);
+  await db.ref('drooms/'+state.roomCode+'/choices').set(null);
+  updateTurnDisplay(nextTurn);
+  await startTurn(nextTurn);
+  state.myActionSent=false;
+  document.getElementById('choices-section').style.display='none';
+  document.getElementById('waiting-section').style.display='none';
+});
+
+// 参加者：フェーズ変化でmyActionSentをリセット
+db && (() => {})(); // 後でlistenRoom内で処理
+
+// ══════════════════════════════════════
+//  エンディング
+// ══════════════════════════════════════
+async function fetchEnding(){
+  if(document.getElementById('phase-ending').classList.contains('active')) return;
+  const snap=await db.ref('drooms/'+state.roomCode+'/ending').once('value');
+  const data=snap.val()||{};
+  showEnding(data);
+}
+
+function showEnding(data){
+  showPhase('ending');
+  const isVictory=data.result==='victory';
+  const resultEl=document.getElementById('ending-result');
+  resultEl.innerHTML=`
+    <div class="result-card ${isVictory?'result-victory':'result-defeat'}">
+      <div class="result-title">${isVictory?'🎉 勝利！':'💀 全滅...'}</div>
+      <div style="font-size:14px;color:var(--muted)">${esc(data.comment||'')}</div>
+      ${data.mvp?`<div class="result-mvp">🌟 MVP：${esc(data.mvp)}</div>`:''}
+    </div>`;
+  document.getElementById('narration-ending').textContent=data.narration||'';
+}
+
+document.getElementById('btn-replay').addEventListener('click',()=>{
+  if(state.roomCode) db.ref('drooms/'+state.roomCode).off();
+  state.roomCode=null; state.isHost=false; state.history=[];
+  state.myActionSent=false; state.currentTurn=1;
+  document.getElementById('join-form').style.display='none';
+  document.getElementById('input-myname').value='';
+  document.getElementById('input-skill').value='';
+  showPhase('setup');
+});
+</script>
+</body>
+</html>
