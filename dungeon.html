@@ -412,33 +412,34 @@ function listenRoom(){
     const turn=snap.val()||0;
     if(turn>0 && document.getElementById('phase-dungeon').classList.contains('active')){
       updateTurnDisplay(turn);
-      // 参加者側もターンが変わったらアクション送信状態をリセット
-      if(!state.isHost && turn > state.currentTurn){
+      // ターンが変わったら全員アクション送信状態をリセット
+      if(turn > state.currentTurn){
         state.myActionSent=false;
         document.getElementById('waiting-section').style.display='none';
         document.getElementById('choices-section').style.display='none';
+        state.currentTurn=turn;
+        // ターン変化後に選択肢を取りに行く（少し待ってホストの書き込みを待つ）
+        setTimeout(()=>{
+          db.ref('drooms/'+state.roomCode+'/choices').once('value', cs=>{
+            if(cs.val() && !state.myActionSent) showChoices(cs.val());
+          });
+        }, 1000);
+      } else {
+        state.currentTurn=turn;
       }
-      state.currentTurn=turn;
     }
   });
   // 行動状況を監視
   db.ref('drooms/'+state.roomCode+'/actions').on('value', snap=>{
     updateActionStatus(snap.val()||{});
   });
-  // ナレーション監視 → 完了後に選択肢を取りに行く
+  // ナレーション監視
   db.ref('drooms/'+state.roomCode+'/narration').on('value', snap=>{
     if(snap.val() && document.getElementById('phase-dungeon').classList.contains('active')){
       document.getElementById('narration').textContent=snap.val();
-      if(!state.myActionSent){
-        setTimeout(()=>{
-          db.ref('drooms/'+state.roomCode+'/choices').once('value', cs=>{
-            if(cs.val()) showChoices(cs.val());
-          });
-        }, 500);
-      }
     }
   });
-  // 選択肢監視（バックアップ）
+  // 選択肢監視 - myActionSentがfalseのときのみ表示
   db.ref('drooms/'+state.roomCode+'/choices').on('value', snap=>{
     if(snap.val() && !state.myActionSent) showChoices(snap.val());
   });
