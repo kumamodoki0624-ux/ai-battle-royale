@@ -412,6 +412,13 @@ function listenRoom(){
     const turn=snap.val()||0;
     if(turn>0 && document.getElementById('phase-dungeon').classList.contains('active')){
       updateTurnDisplay(turn);
+      // 参加者側もターンが変わったらアクション送信状態をリセット
+      if(!state.isHost && turn > state.currentTurn){
+        state.myActionSent=false;
+        document.getElementById('waiting-section').style.display='none';
+        document.getElementById('choices-section').style.display='none';
+      }
+      state.currentTurn=turn;
     }
   });
   // 行動状況を監視
@@ -594,15 +601,14 @@ document.getElementById('btn-next-turn').addEventListener('click', async()=>{
   if(!state.isHost) return;
   document.getElementById('btn-next-turn').style.display='none';
   document.getElementById('waiting-section').style.display='none';
+  document.getElementById('choices-section').style.display='none';
   state.myActionSent=false;
   const nextTurn=state.currentTurn+1;
-  await db.ref('drooms/'+state.roomCode+'/turn').set(nextTurn);
+  // Firebaseのturnを更新（参加者側のリスナーがこれを受けてリセットする）
   await db.ref('drooms/'+state.roomCode+'/choices').set(null);
+  await db.ref('drooms/'+state.roomCode+'/turn').set(nextTurn);
   updateTurnDisplay(nextTurn);
   await startTurn(nextTurn);
-  state.myActionSent=false;
-  document.getElementById('choices-section').style.display='none';
-  document.getElementById('waiting-section').style.display='none';
 });
 
 // 参加者：フェーズ変化でmyActionSentをリセット
