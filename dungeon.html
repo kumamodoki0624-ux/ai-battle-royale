@@ -425,15 +425,22 @@ function listenRoom(){
   db.ref('drooms/'+state.roomCode+'/actions').on('value', snap=>{
     updateActionStatus(snap.val()||{});
   });
-  // ナレーション監視
+  // ナレーション監視 → 完了後に選択肢を取りに行く
   db.ref('drooms/'+state.roomCode+'/narration').on('value', snap=>{
     if(snap.val() && document.getElementById('phase-dungeon').classList.contains('active')){
       document.getElementById('narration').textContent=snap.val();
+      if(!state.myActionSent){
+        setTimeout(()=>{
+          db.ref('drooms/'+state.roomCode+'/choices').once('value', cs=>{
+            if(cs.val()) showChoices(cs.val());
+          });
+        }, 500);
+      }
     }
   });
-  // 選択肢監視
+  // 選択肢監視（バックアップ）
   db.ref('drooms/'+state.roomCode+'/choices').on('value', snap=>{
-    if(snap.val()) showChoices(snap.val());
+    if(snap.val() && !state.myActionSent) showChoices(snap.val());
   });
 }
 
